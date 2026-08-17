@@ -41,6 +41,8 @@ MEDIA_PATH=./media
 MEDIA_GID=1000
 # 容器日志和定时任务的时区；请使用 IANA 时区名称
 TZ=Asia/Shanghai
+# 硬件转码默认关闭；确认设备已挂载后再改为 auto
+HARDWARE_ACCELERATION=none
 ```
 
 普通 Docker Compose 部署通常只需修改 `HOST_PORT`；host 网络模式则修改 `SERVER_PORT`。两者互不影响，也不会暴露 PostgreSQL 或 Redis 的容器内端口。`TZ` 可改为 `Asia/Tokyo`、`Europe/Berlin` 等 [IANA 时区名称](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)。`REDIS_MAXMEMORY` 设置偏小不会损坏媒体数据，但会更频繁淘汰缓存并增加 PostgreSQL 与磁盘读取。
@@ -76,6 +78,7 @@ services:
       DATABASE_URL: postgres://linger:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@db:5432/linger
       REDIS_URL: redis://redis:6379/0
       TZ: ${TZ:-Asia/Shanghai}
+      HARDWARE_ACCELERATION: ${HARDWARE_ACCELERATION:-none}
       # 0 为自动值；在 .env 设置正整数即可手动限制
       PROBE_SEMAPHORE_LIMIT: ${PROBE_SEMAPHORE_LIMIT:-0}
     volumes:
@@ -175,6 +178,33 @@ Redis 只保存可重建缓存，不需要持久化。媒体目录默认以只�
 支持常见视频、外挂字幕、NFO、`poster.jpg` 等本地伴随文件。剧集按“剧集 → 季 → 单集”组织；同一影片的多个媒体版本会合并为一个逻辑项目。
 
 `.strm` 文件可以包含 HTTP(S) 地址或本地绝对路径。若内容是本地路径，该路径必须在 Linger 容器内可见；必要时为目标目录增加额外的只读卷挂载。只有确实需要从管理端删除源文件时，才应将媒体卷改为可写并启用媒体库的深度删除选项。
+
+## 每个用户的媒体库显示
+
+管理员可在“用户 → 某个用户 → 媒体库显示”为任意用户（包括自己）选择显示哪些已授权媒体库，并调整顺序。普通用户可在左侧“媒体库显示”页面设置自己的显示与顺序，但看不到其他用户列表，也不能改变自己的媒体库访问范围。取消勾选只会从该用户的首页和客户端视图中隐藏媒体库，不会删除媒体或撤销权限。
+
+## 硬件转码（可选）
+
+默认关闭。完成设备挂载后，将 `.env` 的 `HARDWARE_ACCELERATION` 改为 `auto`，并在管理端“通用 → 服务器 → 转码”开启“启用硬件转码”。Linger 会在每次启动时进行一次实际的一帧编码自检，并按 `NVENC → QSV → VAAPI` 选择可用后端；设备、驱动或编码器不完整时会保持软件转码，不影响播放。
+
+Intel/AMD 主机通常在 `docker-compose.override.yml` 添加：
+
+```yaml
+services:
+  app:
+    devices:
+      - /dev/dri:/dev/dri
+```
+
+NVIDIA 主机需要先安装宿主机驱动和 NVIDIA Container Toolkit，再添加：
+
+```yaml
+services:
+  app:
+    gpus: all
+```
+
+重启后通过 `docker compose logs app` 确认出现 `Hardware transcoding enabled`。也可将 `HARDWARE_ACCELERATION` 设为 `vaapi`、`qsv` 或 `nvenc` 强制只尝试一种后端；设为 `none` 会禁用硬件设备探测。
 
 ## 元数据与图片
 
